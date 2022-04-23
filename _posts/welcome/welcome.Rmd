@@ -1,0 +1,928 @@
+---
+title: "A credit card predictor model"
+
+author:
+  - name: Patrick Kanda 
+    
+date: "`r Sys.Date()`"
+output: distill::distill_article
+ toc: true
+    toc_depth: 2
+    toc_float: true
+    code_folding: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# Introduction
+
+A [CNBC article](https://www.cnbc.com/select/what-issuers-look-at-on-credit-card-applications/) lists some requirements that people must meet for their credit card application to be successful. These include: age, income, residency/citizenship, as well as credit score. Against this backdrop, I build in this post a predictor model for the approval of an individual's credit card application.
+
+To begin, I reset the `RStudio` environment and load the required packages.
+
+```{r packages, include = TRUE}
+
+rm(list = ls())
+
+packages <- c("magrittr", "modelr", "AER", "tidyverse", "GGally", "ggthemes", 
+              "gridExtra", "grid", "egg", "ggmosaic", "broom", "caret", "car", 
+              "broom.helpers", "moments", "rmarkdown", "pscl", "plotROC")
+
+invisible(lapply(packages, library, character.only = TRUE))
+
+```
+
+
+
+```{r themes, echo = FALSE, include = FALSE}
+
+## Avoidance of scientific numbers
+#options(scipen = 999)
+
+couleur <- "tomato" 
+
+mycol1 <- paste(couleur, "1", sep = "")
+mycol2 <- paste(couleur, "2", sep = "")
+mycol3 <- paste(couleur, "3", sep = "")
+mycol4 <- paste(couleur, "4", sep = "")
+  
+# mycol1 <- "tomato1"
+# mycol2 <- "tomato2"
+# mycol3 <- "tomato3"
+# mycol4 <- "tomato4"
+
+theme_set(theme_economist_white())
+
+theme_box <- theme(axis.ticks.y = element_line(size = .5, colour = "black"),
+    axis.ticks.x = element_blank(),
+    plot.background = element_rect(fill = "white"),
+    plot.subtitle = element_text(hjust = .5),
+    panel.background = element_rect(fill = "white"),
+    #panel.grid.major = element_line(size = .5, colour = "gray", linetype = "solid"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text = element_text(size = 9),
+    axis.title = element_text(size = 9), 
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)), 
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.ticks.length = unit(-.15, "cm"),
+    panel.border = element_blank() 
+    #axis.line.y = element_line(),
+    #axis.line = element_line(), 
+    #axis.ticks = element_line(colour='black')
+    ) 
+
+theme_plot_estimates <- theme(panel.grid.major = element_blank(),
+    #panel.grid.major = element_line(linetype = "dotted", colour = "gray", size = .5),
+    #plot.title = element_text(hjust = .5),
+    plot.subtitle = element_text(hjust = .5),
+    panel.background = element_rect(fill = "white"),
+    axis.ticks.y = element_line(size = .5, colour = "black"),
+    plot.background = element_rect(fill = "white"),
+    axis.text = element_text(size = 9),
+    axis.title = element_text(size = 9), 
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)), 
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.ticks.length = unit(-.15, "cm"),
+    plot.title = element_text(size = rel(1.25), face = "bold", margin = margin(b = 10), hjust = .5)
+    ) 
+
+theme_corr <- theme(plot.background = element_rect(fill = "white"), 
+                    legend.background = element_rect(fill = "white"),
+                    axis.line.x = element_blank(),
+                    plot.title = element_text(hjust = .5, size = rel(1.25), face = "bold", 
+                                         margin = margin(t = 0, r = 0, b = 7.5, l = 0.5))
+                    )
+
+theme_scatter <- theme(panel.grid.major = element_blank(),
+                       #panel.grid.major = element_line(size = .6, colour = "gray", linetype = "dotted"),
+                       panel.background = element_rect(fill = "white"),
+                       axis.ticks.y = element_line(size = .1, colour = "black"),
+                       plot.background = element_rect(fill = "white"),
+                       panel.spacing = unit(2, "lines"), #spacing for facet_wrap panels
+                       plot.title = element_text(size = rel(1.25), face = "bold", 
+                                                 margin = margin(t = 0, r = 0, b = 7.5, l = 0)),
+                       axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0)),
+                       axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+                       strip.background = element_rect(colour = "black", fill = mycol4),
+                       axis.ticks.length = unit(-.15, "cm"),
+                       strip.text.x = element_text(colour = "white", size = 15, 
+                                                   margin = margin(t = 0, r = 0, b = 5, l = 0)),
+                       legend.background = element_blank(),
+                       legend.box.margin = margin(t = 0, r = 0, b = 0, l = 10),
+                       legend.key = element_blank(),
+                       legend.position = "right"
+                       ) 
+                      
+
+theme_bar <- theme(#axis.title.y = element_blank(), 
+                   #axis.text.y = element_blank(),
+                   axis.title.x = element_blank(),
+                   #axis.ticks.y = element_blank(),
+                   axis.ticks.y = element_line(size = .5, colour = "black"), 
+                   #panel.grid.major = element_line(size = .6, colour = "gray", linetype = "dotted"),
+                   panel.grid.major = element_blank(),
+                   panel.background = element_rect(fill = "white"),
+                   plot.background = element_rect(fill = "white"),
+                   plot.subtitle = element_text(hjust = .5),
+                   panel.grid.minor = element_blank(),
+                   axis.text = element_text(size = 9),
+                   axis.title = element_text(size = 9),
+                   axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+                   #axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+                   axis.ticks.x = element_blank(),
+                   axis.ticks.length = unit(-.15, "cm"),
+                   plot.title = element_text(size = rel(1.25), face = "bold")
+                   ) 
+
+theme_mosaic <- theme(axis.ticks.x = element_blank(), 
+                      plot.background = element_rect(fill = "white"), 
+                      plot.subtitle = element_text(hjust = .5),
+                      panel.grid.major = element_blank(), 
+                      panel.background = element_rect(fill = "white"), 
+                      axis.line.x = element_blank(),
+                      axis.text = element_text(size = 9), 
+                      axis.title = element_text(size = 9), 
+                      axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)), 
+                      axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+                      plot.title = element_text(size = rel(1.25), face = "bold")
+                      )
+
+```
+
+
+
+# Preparing the data
+
+I load the `CreditCard` dataset into the `R` session, check its structure and display the first few records.
+
+
+
+```{r data, include = TRUE}
+
+data(CreditCard)
+
+str(CreditCard)
+
+head(CreditCard, 3)
+
+```
+
+
+
+The cross-sectional dataset from [Greene (1992)](https://www.amazon.com/Econometric-Analysis-William-Greene-1992-10-30/dp/B01K2RAAOG) originally comprises 1,319 observations on 12 variables. It is readily available from the `AER` package in `R`. The analysis uses 9 variables from this dataset. There are 3 categorical variables (factors): **card**, **owner** and **selfemp**; with the remaining being numerical. The variables are defined as follows:
+
+-   **card**: "yes" if the credit card application is successful and "no", otherwise. This is the *response* variable.
+-   **reports**: number of major derogatory reports against the individual
+-   **age**: the individual's age in years
+-   **income**: the annual income (in USD 10,000) of the individual
+-   **owner**: "yes" if the individual owns their home and "no", otherwise
+-   **selfemp**: "yes" if the individual is self-employed and "no", otherwise
+-   **dependents**: number of the individuals' dependents
+-   **months**: the individual's number of months living at current address
+-   **active**: number of active credit accounts held by the individual
+
+<!-- - **expenditure**: the individual's average monthly credit card expenditure -->
+
+<!-- - **majorcards**: Number of major credit cards held by the individual -->
+
+<!-- - **share**: the ratio of the individual's monthly credit card expenditure to annual income -->
+
+
+
+I convert the original dataset into a tibble called `creditData` and then create a new variable **residency** which expresses the individual's duration living at the current address in years, instead of months as in the original dataset. Next, after restricting the dataset to the variables I will be using to build the predictor model, I display the first 3 records in the modified dataset.
+
+
+
+```{r, include = TRUE}
+
+creditData <- as_tibble(CreditCard) %>%
+  mutate(residency = months / 12) %>% 
+  select(-c(majorcards, expenditure, share, months)) 
+
+head(creditData, 3) 
+
+```
+
+
+
+# Looking at the data
+
+<!-- `r  median(creditData$age)` -->
+
+<!-- `r  median(creditData$income)` -->
+
+<!-- `r  median(creditData$reports)` -->
+
+<!-- `r  median(creditData$dependents)` -->
+
+<!-- `r  median(creditData$residency)` -->
+
+<!-- `r  median(creditData$active)` -->
+
+I use different visualization tools to plot variables in the dataset. I divide this section into two to cater for numerical variables on the one hand, and categorical variables on the other hand. These two types of data call for different visualization approaches. 
+
+## Numerical predictors
+
+I group the data for numerical predictors according to the credit card application outcome. There are 296 individuals whose application was not successful. The remaining 1023 applicants had a positive credit card application outcome (see the following Exhibit). 
+
+
+
+```{r, echo = TRUE, include = TRUE}
+
+creditData %>% 
+  group_by(card) %>% 
+  summarise(applicants = n()) %>% 
+  ungroup()
+
+```
+
+
+
+As shown in the following Figure, the predictors **income**, **active**, **age**, and **residency** show similar distributions across groups defined by the outcome on **card**:
+
+- The interquartile ranges are overlapping;
+- Medians are approximately equal across categories; and
+- Density plots generally have comparable shapes as well as the same number of modes.
+
+Conversely, the predictors **dependents** and **reports** appear to have different distributions across **card** categories. For **dependents**, medians are far apart and there also seems to be a different number of modes across groups. Concerning **reports**, the distribution is concentrated at the value of 0 for the "yes" **card** category. This entails that most individuals who were awarded a credit card had no derogatory reports against them.
+
+
+
+```{r, echo = TRUE, include = TRUE}
+
+box_plot <- function(y_variable, y_label, Title) {
+  ggplot(data = creditData) +
+  aes(x = card, y = y_variable, color = card) +
+  geom_violin(width = .75, alpha = .5, fill = mycol1, color = mycol2, lwd = .5) +
+  geom_boxplot(width = .125, color = mycol4, fill = "white", lwd = .5, alpha = 1) +
+  ylab(y_label) +
+  labs(subtitle = Title) + 
+  theme_box 
+
+}
+
+box_income <- box_plot(creditData$income, "income", "[a]")
+box_dependents <- box_plot(creditData$dependents, "dependents", "[b]")
+box_active <- box_plot(creditData$active, "active", "[c]")
+box_reports <- box_plot(creditData$reports, "reports", "[d]")
+box_age <- box_plot(creditData$age, "age", "[e]")
+box_residency <- box_plot(creditData$residency, "residency", "[f]")
+
+num_variables_plot <- grid.arrange(box_income, box_dependents, box_active,
+                                   box_reports, box_age, box_residency, ncol = 3,
+                                   top = textGrob("Distribution plots",
+                                                  gp = gpar(fontsize = 13, font = 2)))
+
+```
+
+
+
+```{r, echo = TRUE, include = TRUE}
+
+creditData %>% 
+  group_by(card) %>% 
+  summarise(iq_range = IQR(reports), med = median(reports))
+
+```
+
+
+
+```{r, eval = FALSE, include = FALSE, echo = FALSE}
+
+rep_outlier <- creditData %>% 
+  filter(card == "yes" & reports > 0)
+
+rep_outlier
+
+summary(rep_outlier)
+
+rep_outlier %>% filter(reports == 4)
+
+mode(rep_outlier$reports)
+
+```
+
+
+
+That said, I do detect an anomaly within the dataset, specifically concerning the predictor **age**. The outlier value for **age** is suspicious. Some individuals' ages have a value near 0 as can be seen from the box plot. This is abnormal as the required minimum age to apply for a credit card is 18 years (see discussion in the introduction). To confirm my visual assessment, I compute descriptive statistics for the variable **age** as well as query the data to find the positions of records whose age value is less than 18 years.
+
+As can be seen from the Exhibit below, the minimum age in the database is about 0.17 years, which is not a valid age for a credit card application. Querying of the data reveals that there are 7 records having an age below 18. These are located at the 79th, 324th...1195th *etc.* row positions. 
+
+
+
+```{r, echo = TRUE, include = TRUE}
+
+summary(creditData$age)
+
+which(creditData$age < 18)
+
+```
+
+
+
+A more efficient approach is to use filtering to show the targeted records only. I therefore filter the dataset to display these records. I conclude from the outcome below that the age values were wrongly entered for these individuals. In fact, the majority of these applicants had a successful credit card application, except for one individual. The credit card could not have been granted to individuals with an age below 18 years.
+
+
+
+```{r, echo = TRUE, include = TRUE}
+
+creditData %>% filter(age < 18)
+
+```
+<!-- *Note: the same filtering implemented using base R's syntax is:* `subset(creditData, creditData$age < 18)`. -->
+
+Consequently, I remove the concerned records from the dataset and keep records whose predictor values seem reasonable (including other outliers). 
+
+
+
+```{r, echo = FALSE, include = FALSE}
+
+creditData %<>% filter(age >= 18)
+
+```
+
+
+```{r, echo = TRUE, include = TRUE}
+
+creditData %>% 
+  group_by(card) %>% 
+  summarise(applicants = n()) %>% 
+  ungroup()
+
+```
+
+The adjusted dataset has 1312 records (1017 successful applications and 295 failed applications). The minimum age in the new dataset is `r min(creditData$age) %>% round(2)` years. Next, I display the box and violin plots for the modified dataset. I also include individual datapoints for each predictor to add more visual insight on the distribution of the data. 
+
+
+
+```{r, echo = FALSE, include = TRUE}
+
+box_plot <- function(y_variable, y_label, Title) {
+  ggplot(data = creditData) +
+  aes(x = card, y = y_variable) +
+  geom_jitter(alpha = .06) +
+  geom_violin(width = .75, alpha = .25, fill = mycol1, color = mycol2, lwd = .5) +
+  geom_boxplot(width = .125, color = mycol4, fill = "white", lwd = .5, alpha = 1) +
+  ylab(y_label) +
+  labs(subtitle = Title) + 
+  theme_box
+}
+
+box_income <- box_plot(creditData$income, "income", "[a]")
+box_dependents <- box_plot(creditData$dependents, "dependents", "[b]")
+box_active <- box_plot(creditData$active, "active", "[c]")
+box_reports <- box_plot(creditData$reports, "reports", "[d]")
+box_age <- box_plot(creditData$age, "age", "[e]")
+box_residency <- box_plot(creditData$residency, "residency", "[f]")
+
+num_variables_plot <- grid.arrange(box_income, box_dependents, box_active, 
+                                   box_reports, box_age, box_residency, ncol = 3, 
+                                   top = textGrob("Distribution plots (modified)", 
+                                                  gp = gpar(fontsize = 13, font = 2)))
+
+```
+
+
+
+```{r, eval = FALSE, include = FALSE, echo = FALSE}
+
+creditData %>% 
+  arrange(card) %>% 
+  filter(dependents >= 6)
+
+```
+
+
+
+```{r, eval = FALSE, include = FALSE, echo = FALSE}
+
+creditData %>% 
+  group_by(card) %>% 
+  summarise(med_inc = median(income), med_dep = median(dependents), med_act = median(active), med_rep = median(reports),
+            med_age = median(age), med_years = median(years))  
+
+creditData %>% 
+  group_by(card) %>% 
+  summarise(iqr_inc = IQR(income), iqr_dep = IQR(dependents), iqr_act = IQR(active), iqr_rep = IQR(reports), 
+            iqr_age = IQR(age), iqr_yrs = IQR(years)) 
+
+creditData %>% 
+  group_by(card) %>% 
+  summarise(ran_inc = max(income) - min(income), ran_dep = max(dependents) - min(dependents), 
+            ran_act = max(active) - min(active), ran_rep = max(reports) - min(reports), 
+            ran_age = max(age) - min(age), ran_yrs = max(years) - min(years)) 
+
+creditData %>% 
+  group_by(card) %>% 
+  summarise(skew_inc = skewness(income), skew_dep = skewness(dependents), skew_act = skewness(active), 
+            skew_rep = skewness(reports), skew_age = skewness(age), skew_yrs = skewness(years)) 
+
+
+```
+
+
+
+Finally, I report correlations between pairs of numerical predictors. **age** and **residency** are the most correlated predictors ($\rho =$ 0.5). That is, there is a positive association between an individual's age and the number of years spent living at their current address. For the remaining pairs, correlation coefficients vary between 0.3 and 0.
+
+
+
+```{r, echo = TRUE, include = TRUE}
+
+corr_plot <- creditData %>% 
+  select(active, income, age, reports, residency, dependents) %>% 
+  ggcorr(method = c("everything", "pearson"), label = TRUE, label_alpha = TRUE, 
+         label_round = 1, high = mycol3, mid = "white", low = "black", size = 3.3) +
+  labs(title = "Pearson's correlation coefficients") +
+  theme_corr
+
+corr_plot
+
+```
+
+
+
+<!-- As an illustration of the correlation discussed above for the pair **age**-**residency**, I show in the following Figure the related scatter diagram with a fitted OLS regression line. The Figure distinguishes two groups based on the variable **card**. The left (*resp.* right) panel depicts the **age**-**residency** association for individuals whose credit card application failed (*resp.* succeeded).   -->
+
+
+
+```{r, eval = FALSE, include = FALSE, echo = FALSE}
+
+scatter_plot <- function(pred1, pred2, titre, xlb, ylb) {
+  
+creditData %>%
+  ggplot(data = .) +
+  aes(x = pred1, y = pred2) +
+  geom_point(alpha = .15, size = 3, color = mycol4) +
+  geom_smooth(colour = "springgreen4", method = "glm", size = .5) +
+  theme(panel.grid.minor = element_blank()) +
+  facet_wrap(~card) +
+  labs(title = titre, x = xlb, y = ylb) + 
+  theme_scatter 
+  
+} 
+
+scatter_age_residency <- scatter_plot(creditData$age, creditData$residency, "age vs. residency by application outcome", "age", "residency")
+
+scatter_age_residency
+
+```
+
+
+
+```{r, eval = FALSE, include = FALSE, echo = FALSE, fig.cap = "Hexbin chart in R"}
+
+hex_plot <- creditData %>%
+  ggplot(data = .) +
+  aes(x = age, y = residency) +
+  stat_binhex(color = "white") +
+  theme(panel.grid.minor = element_blank()) +
+  scale_fill_gradient(low = mycol3, high = "white") + 
+  #facet_wrap(~card) +
+  labs(title = "Fig.: age vs. years by application outcome", subtitle = "", caption = "") + 
+  theme_scatter
+
+hex_plot
+
+```
+
+
+
+```{r, eval = FALSE, include = FALSE, echo = FALSE, fig.cap = "Hexbin chart in R"}
+
+cont_plot <- creditData %>%
+  ggplot(data = .) +
+  aes(x = age, y = residency) +
+  geom_point(alpha = .25, color = "black", size = 3) +
+  geom_density2d(color = "tomato", size = .5) +
+  theme(panel.grid.minor = element_blank()) +
+  scale_fill_gradient(low = mycol1, high = "white") + 
+  #facet_wrap(~card) +
+  labs(title = "Fig.: age vs. years by application outcome", subtitle = "", caption = "") +
+  theme_scatter
+
+cont_plot
+
+```
+
+
+
+## Categorical variables
+
+
+
+Next, I use bar plots to show the percentage share of individuals falling in the "yes" or "no" groups for each categorical variable. The following plot shows that the majority of individuals in the dataset:
+
+-   had a successful credit card application - panel [a],
+-   were not self-employed - panel [b], and
+-   did not own their homes - panel [c].
+
+
+
+```{r, echo = TRUE, include = TRUE}
+
+bar_plot <- function(x_variable, Title) {
+  ggplot(data = creditData) +
+  aes(x = x_variable) +
+  geom_bar(aes(y = (..count..) / sum(..count..)), fill = mycol1, color = mycol4, 
+           lwd = .5, alpha = .4, width = .75) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  labs(subtitle = Title, y = "share") + 
+  theme(aspect.ratio = 2/1.25) +
+  theme_bar 
+}
+
+bar_card <- bar_plot(creditData$card, "[a] card")
+bar_selfemp <- bar_plot(creditData$selfemp, "[b] selfemp") 
+bar_owner <- bar_plot(creditData$owner, "[c] owner") 
+
+fact_var_plot <- grid.arrange(bar_card, bar_selfemp, bar_owner, ncol = 3, 
+                              top = textGrob("Bar plots", gp = gpar(fontsize = 13, font = 2), vjust = 3.5))
+
+```
+
+
+
+From the mosaic plot, it is further evident that job security (*i.e.* whether an individual is self-employed or not) appears to be a key criterion when applying for a credit card. As can be seen in Panel [a], the product (**card** = "yes", **selfemp** = "no") accounts for the largest area. Contingency tables on which the mosaic plots are based reveal that 7 out of 10 individuals in the entire dataset were not self-employed *and* received a positive application outcome. On the other hand, only about 4 out of 10 applicants were owners of their homes *and* had a successful outcome, this corresponds to area of the product (**card** = "yes", **owner** = "yes") depicted in Panel [b].
+
+<!-- *Note:* `prop.table(table(creditData$card, creditData$selfemp))` *is the command to get the contingency table of* **card**-**selfemp**, *as  an example*. -->
+
+
+
+```{r, echo = TRUE, include = TRUE}
+
+mosaic_card_selfemp <- ggplot(data = creditData) +
+  geom_mosaic(aes(x = product(card, selfemp)), fill = mycol1, colour = mycol4, 
+              lwd = .5, offset = .015, alpha = .4) + 
+  labs(subtitle = "[a] card - selfemp") +
+  theme(aspect.ratio = 1/1.25) + 
+  theme_mosaic
+
+mosaic_card_owner <- ggplot(data = creditData) +
+  geom_mosaic(aes(x = product(card, owner)), fill = mycol1, colour = mycol4, 
+              lwd = .5, offset = .015, alpha = .4) + 
+  labs(subtitle = "[b] card - owner") + 
+  theme(aspect.ratio = 1/1.25) +
+  theme_mosaic
+
+combined_mosaic <- grid.arrange(mosaic_card_selfemp, mosaic_card_owner, ncol = 2, 
+                                top = textGrob("Mosaic plots", gp = gpar(fontsize = 13, font = 2), vjust = 3.5)                                 ) 
+
+```
+
+```{r, echo = FALSE, include = FALSE, eval = FALSE}
+
+mosaic_selfemp_owner <- ggplot(data = creditData) +
+  geom_mosaic(aes(x = product(owner, selfemp)), colour = mycol4, lwd = .5, offset = .015, 
+              alpha = .4) + 
+  labs(subtitle = "") +
+  theme(aspect.ratio = 1/1.25) + 
+  theme_mosaic
+
+mosaic_selfemp_owner
+
+mosaicplot(prop.table(table(creditData$card, creditData$selfemp)))
+
+```
+
+
+
+
+```{r, echo = FALSE, include = FALSE, eval = FALSE}
+
+card_selfemp_table <- prop.table(table(creditData$card, creditData$selfemp)) %>% round(2) * 100
+
+card_selfemp_table
+
+vcd::assocstats(card_selfemp_table)
+
+vcd::assoc(card_selfemp_table)
+
+```
+
+
+
+```{r, echo = FALSE, include = FALSE, eval = FALSE}
+
+card_owner_table <- prop.table(table(creditData$card, creditData$owner)) %>% round(2) * 100
+
+card_owner_table
+
+vcd::assocstats(card_owner_table)
+
+```
+
+
+
+```{r, eval = FALSE, include = FALSE, echo = FALSE}
+
+contingency <- function(x) {
+    chi <- chisq.test(x)
+    unname(sqrt(chi$statistic / (chi$statistic + sum(x))))
+}
+
+V <- function(x) {
+    unname(sqrt(chisq.test(x)$statistic / (sum(x) * (min(dim(x)) - 1))))
+}
+
+contingency(card_selfemp_table)
+
+contingency(card_owner_table)
+
+V(card_selfemp_table)
+
+V(card_owner_table)
+
+```
+
+
+* Visual inspection of the data reveals some abnormal outlier values for the predictor **age**. As a result, I clean the dataset by removing records that were wrongly captured. 
+
+* In light of the data visualization exercise, I expect **report** and **selfemp** to play a key role in determining the credit card application outcome in the predictor model. This owes to the discernible difference in the distribution of the two predictors across the categories of individuals whose application was successful and those for whom it got rejected.   
+
+* The extent to which other predictor variables are influential can only be ascertained during the modelling task because no particular pattern emerges from visualizing their distributions as a function of the response variable **card**.
+
+
+
+# The model
+
+The response variable **card** is qualitative, taking the values "yes" or "no" depending on the credit card application outcome. Hence, I use a classification method called **logistic regression** to predict the outcome of a credit card application given the set of predictors as afore-mentioned. The logistic model predicts *the probability* of the credit card application being successful. It does not directly predict the response variable **card**. For this reason, one can use different probability thresholds to determine whether the application is successful or not. For example, a threshold of 0.5 can be used such that if the predicted probability is greater than or equal to the threshold, then the credit card application is a success; otherwise, it is a failure. For a more conservative bank, the threshold can be higher, say 0.75.
+
+The logistic model is suited to predict a binary response variable because, unlike a standard regression model, its output is restricted to the interval between 0 and 1, regardless of the values assumed by the predictors.
+
+A logistic function is defined as follows:
+
+$$ p(X) = \frac{exp(\beta_{0} + \sum^{k}_{i=1}\beta_{i}X_{i})}{1+exp(\beta_{0} + \sum^{k}_{i=1}\beta_{i}X_{i})}  $$
+where:
+
+* $p(X)$ is the probability of the card application being successful conditional on all the predictors $X$.
+* $exp$ is the exponential function.
+* $\beta$s are parameters.
+
+Defining the odds ratio (or simply "the odds") as $\frac{p(X)}{1-p(X)}$, the logistic function above can be written as:
+
+$$ \frac{p(X)}{1-p(X)} = exp\left( \beta_{0} + \sum^{k}_{i=1}\beta_{i}X_{i} \right) $$
+
+
+
+Taking the natural logarithm on both sides yields the log odds (or *logit*) function, which expressed as a regression model is:
+
+$$ log \left( \frac{p(X)}{1-p(X)} \right) = \beta_{0} + \sum^{k}_{i = 1} \beta_{i}X_{i} + \varepsilon $$
+where $\beta_{0}$, $\beta_{i} \ (i = 1,2, \dots, k)$ are parameters to be estimated. $\varepsilon$ is the regression error term. 
+
+<!-- * $p$ is the probability of the credit card application being successful; -->
+<!-- * $\beta_{0}$ is the intercept; -->
+<!-- * $\beta_{i}$ are the model coefficients; -->
+<!-- * $X_{i}$ are the predictor variables; and -->
+<!-- * $\varepsilon$ is the regression error term. -->
+
+
+
+## Sampling
+
+First, I randomly separate the dataset into two: a training sample and a test sample. The former, representing 60% of the original dataset, will be used to estimate the predictor model. The latter, accounting for the remaining 40% of the data, will serve to measure the performance of the model, that is, checking its predictive accuracy.
+
+
+
+```{r, echo = TRUE, include = TRUE}
+
+set.seed(2021)
+smpl <- sample(c(TRUE, FALSE), nrow(creditData), replace = TRUE, prob = c(.6, .4))
+train <- creditData[smpl, ]
+test <- creditData[!smpl, ]
+
+```
+
+
+
+## Model estimation
+
+The logistic model is estimated by maximum likelihood in `R`. However, before estimating the model, I need to verify the way `R` maps the response variable **card** to a binary variable. It is important to know how the ensuing dummy variable is defined. This information determines how to interpret the model's outcome. As can be seen below, `R` assigns the value of 1 to "yes" and 0 to "no" for the response variable. Therefore, results will be interpreted in terms of the probability of the credit card application being successful, conditional on the predictors.
+
+
+
+```{r, include = TRUE, echo =  TRUE}
+
+contrasts(creditData$card)
+
+```
+
+
+
+The following Figure plots the exponential of the estimated parameters with their confidence intervals. I perform the likelihood ratio (LR) test to assess the relevance of each variable in the model. According to results reported in the  Exhibit below, the null hypothesis of a valid restriction (*i.e* the model excludes the predictor variable) is strongly rejected at any conventional level of significance for the predictors **reports**, **active**, and **selfemp**. This implies that the restrictions are not valid. Hence, these predictors belong to the model. On the other hand, we fail to reject the null for **age** at at any conventional level of significance. 
+
+
+
+```{r, echo = TRUE, include = TRUE}
+
+logit_mod_full <- glm(card ~ income + owner + reports + active + selfemp + 
+                        dependents + age + residency, family = "binomial", data = train)
+
+logit_full_estimates <- ggcoef(logit_mod_full, exclude_intercept = TRUE, exponentiate = TRUE, 
+                               vline_color = "springgreen4", errorbar_color = mycol3, errorbar_height = .3,
+                               vline_linetype = "dashed", color = mycol2, size = 3.5, 
+                               mapping = aes(x = estimate, y = term), vline_size = .7, sort = "ascending") +
+  labs(title = "Full logistic model", x = "exponential of estimates") +
+  scale_size_continuous(trans = "reverse") + 
+  theme_plot_estimates
+
+tidy(logit_mod_full)
+
+exp(coef(logit_mod_full)) %>% round(2)
+
+logit_full_estimates
+
+```
+
+
+
+```{r, echo = TRUE, include = TRUE}
+
+Anova(logit_mod_full, type = "III", test.statistic = "LR") %>% round(2)
+
+```
+
+
+
+I then determine which predictors have the highest influence on the outcome of a credit card application using the variable importance score from the `caret` package. The scaled score takes values between 0 and 100. As shown in the Exhibit below, **reports** is the most influential predictor, followed by **active** and **selfemp**. **age** is the least influential predictor. This result is in line with our conclusion from the data visualization task that **reports** and **selfemp** appeared to play a key role in determining the credit card application outcome. In general, I get comparable results as in the LR tests above.  
+
+
+
+```{r, echo = TRUE, include = TRUE}
+
+varImp(logit_mod_full) %>% arrange(desc(Overall)) %>% round(2) 
+
+```
+
+
+
+## Model selection
+
+In light of the estimation, LR test and variable importance score which show that not all predictors are significant in the model, I use a stepwise algorithm to automatically determine the best model specification based on the criterion of minimizing the Akaike Information Criterion (AIC). I use a *backward selection* method for the stepwise search. Starting with the full model, the predictor whose removal from the model results in the greatest reduction in the AIC is removed. This procedure stops when the AIC cannot be reduced by excluding a predictor. In my case, the procedure suggests getting rid of the variable **age**. Its exclusion from the model reduces the AIC from 582.40 to 581.75. The procedure stops at this stage as no further variable exclusions result in a lower AIC. 
+
+
+
+```{r, echo = TRUE, include = TRUE}
+
+logit_steps <- step(logit_mod_full, direction = "backward") 
+
+```
+
+
+
+I estimate the new logistic model specification which excludes the variable **age**. The Figure below plots the exponential of estimated parameters and their confidence intervals. The LR test result shown in the Exhibit below reveals that five predictors (**reports**, **active**, **selfemp**, **dependents**, **residency**) are significant at the 5 percent level and two (**income**, **owner**) at the 10 percent level. 
+
+
+
+```{r, echo = TRUE, include = TRUE}
+
+logit_mod_steps <- glm(card ~ income + owner + residency + reports + active + dependents + 
+                         selfemp, family = "binomial", data = train)
+
+logit_steps_estimates <- ggcoef(logit_mod_steps, exclude_intercept = TRUE, exponentiate = TRUE, 
+                                vline_color = "springgreen4", errorbar_color = mycol3, errorbar_height = .3, 
+                                color = mycol2, size = 3.5, sort = "ascending", vline_size = .7, 
+                                vline_linetype = "dashed", mapping = aes(x = estimate, y = term)) +
+  labs(title = "Steps logistic model", x = "exponential of estimates") + 
+  scale_size_continuous(trans = "reverse") + 
+  theme_plot_estimates
+
+logit_steps_estimates
+
+```
+
+
+
+```{r, echo = TRUE, include = TRUE}
+
+Anova(logit_steps, type = 3, test.statistic = "LR") %>% round(2)
+
+```
+
+
+
+Next, I perform a test involving the nested models estimated above. The null hypothesis for the test is $H_{0}$: parameters of excluded predictors are 0. As shown in the Exhibit below, the $p$-value associated with this test is greater than 10 percent. Therefore, we fail to reject the null hypothesis. In my case, the parameter of the variable **age** is statistically not different from 0. Hence, the model excluding **age** is preferred.
+
+
+
+```{r, echo = TRUE, include = TRUE}
+
+anova(logit_mod_steps, logit_mod_full, test = "LRT") %>% round(2)
+
+```
+
+
+
+```{r, echo = FALSE, include = FALSE, eval = FALSE}
+
+list(full = pscl::pR2(logit_mod_full)["McFadden"],
+     steps = pscl::pR2(logit_mod_steps)["McFadden"])
+
+```
+
+
+
+I then determine which standardized residuals exceed 3 standard deviations as they can be considered to be outliers that require close scrutiny. As shown in the Figure below, only one such outlier falls out of the interval delimited by the 2 dashed green horizontal lines. This record concerns an individual whose credit card application was successful despite having 4 derogatory reports and 12 active credit accounts.  
+
+
+
+```{r, echo = TRUE, include = TRUE}
+
+steps_data <- augment(logit_mod_steps) %>% mutate(index = 1:n())
+
+ggplot(steps_data) +
+  aes(x = index, y = .std.resid, colour = card) +
+  geom_hline(yintercept = 3, linetype = "dashed", color = "springgreen4", size = .69) + 
+  geom_hline(yintercept = -3, linetype = "dashed", color = "springgreen4", size = .69) +
+  geom_point(alpha = .5, size  = 3) +
+  scale_color_manual(values = c("gray20", mycol2)) +
+  labs(title = "Standardized residuals of the steps logistic model") +
+  ylim(c(-4, 4)) +
+  theme_scatter 
+
+```
+
+
+
+```{r, echo = FALSE, include = FALSE, eval = FALSE}
+
+resid_outlier <- steps_data %>% filter(abs(.std.resid) > 3)
+
+resid_outlier
+
+mean(creditData$income)
+
+```
+
+
+
+## Prediction
+
+I use a conventional threshold of 50 percent and the rule that a card application outcome is positive if the predicted probability exceeds the threshold. The logistic model predicts that the card application is successful for the first 10 records of the test. Indeed, as can be seen in the Exhibit below, the predicted probabilities are greater than the threshold.  
+
+
+```{r, echo = TRUE, include = TRUE}
+
+predict_step <- predict(logit_mod_steps, newdata = test, type = "response")
+
+predict_step[1:10] %>% round(2)
+
+```
+
+
+
+## Performance evaluation of the model
+
+I then calculate the classification error for the steps logistic regression model by comparing predicted values to those observed in the test sample. The error rate is about 17 percent.
+
+```{r, eval = TRUE, include = TRUE, echo = TRUE}
+
+prev_prob <- data.frame(steps = predict(logit_mod_full, newdata = test, type = "response"))
+
+prev_class <- apply(prev_prob >= .5, 2, factor, labels = c("no", "yes"))
+
+prev_class <- data.frame(prev_class)
+prev_class %>% 
+  mutate(obs = test$card) %>% 
+  summarise_all(funs(err = mean(obs != .))) %>% 
+  select(-obs_err) %>% 
+  round(3)
+
+```
+
+The Figure below shows the Receiver Characteristic (ROC) Curve  which is a graphical tool used to diagnose the performance of a classification model such as the logistic classifier. Simply put, the model performs well in prediction when the ROC curve is further from the diagonal line of equality between the true positive rate (probability of detection) and the false positive rate (probability of false alarm). This seems to be case in this exercise. 
+
+```{r, eval = TRUE, include = TRUE, echo = TRUE}
+
+data_ROC <- prev_prob %>% 
+  mutate(obs = test$card) %>% gather(key = logit_type, value = score, steps)
+
+ggplot(data_ROC) +
+  aes(d = obs, m = score, color = mycol3) +
+  geom_abline(slope = 1,  intercept = 0, linetype = "dashed", color = "springgreen4", size = 0.69) +
+  geom_roc() +
+  labs(title = "ROC curve", x = "False positive rate", y = "True positive rate") + 
+  theme_scatter +
+  theme(legend.position = "none")
+
+```
+
+A related diagnosis metric to the ROC is the Area Under the ROC Curve, also known as AUC. It varies between 0 (for a model with predictions that are 100 percent wrong) and 1 (for a model with predictions that are 100 percent correct). In this exercise, the AUC is 81 percent. 
+
+```{r, eval = TRUE, include = TRUE, echo = TRUE}
+
+data_ROC %>%  
+  summarize(AUC = pROC::auc(obs, score))
+
+```
+
+# Conclusion
+
+In this exercise, I develop a predictor model for the credit card application. I use a logistic classifier based on a number of predictor variables informed by practices within financial institutions. After analysing the distribution of variables and making adjustments to the dataset where required, I train the model on a subset of the dataset and use the other subset to diagonise the model's predictive performance. In general, I find that the logistic classifier does a fairly good job in predicting the probability of a card application being successful given the information on the set of predictors at hand. That said, there is still room to create lift for the model (improving the AUC and ROC) so as to increase its classification rate.
+
+
+
+
+
